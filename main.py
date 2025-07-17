@@ -1,9 +1,11 @@
 import telegram
 import os
 
-bot = telegram.Bot(token=os.environ['BOT_TOKEN'])
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-bot.send_message(chat_id=os.environ['TELEGRAM_CHAT_ID'], text="✅ Vault alert bot is LIVE and sending messages.")
+bot = telegram.Bot(token=TELEGRAM_TOKEN)
+bot.send_message(chat_id=CHAT_ID, text="✅ Vault alert bot is LIVE and sending messages.")
 
 # re-deploying to trigger Python 3.10
 
