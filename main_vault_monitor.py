@@ -8,16 +8,41 @@ from hyperliquid.utils import constants
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Configuration: Add your actual vault addresses here
+# Configuration: Add your vault names and addresses here
 VAULT_CONFIG = {
     'martybit_vault': {
         'address': '0x0000000000000000000000000000000000000000',  # Replace with actual vault address
         'name': 'Martybit Vault',
         'enabled': False  # Set to True when you have real addresses
     },
+    'strategic_defi_vault': {
+        'address': '0x0000000000000000000000000000000000000000',  # Replace with actual vault address
+        'name': 'Strategic DeFi Vault',
+        'enabled': False  # Set to True when you have real addresses
+    },
     'opportunity_vault': {
         'address': '0x0000000000000000000000000000000000000000',  # Replace with actual vault address  
         'name': 'Opportunity Vault',
+        'enabled': False  # Set to True when you have real addresses
+    },
+    'alpha_vault': {
+        'address': '0x0000000000000000000000000000000000000000',  # Replace with actual vault address
+        'name': 'Alpha Vault',
+        'enabled': False  # Set to True when you have real addresses
+    },
+    'beta_vault': {
+        'address': '0x0000000000000000000000000000000000000000',  # Replace with actual vault address
+        'name': 'Beta Vault', 
+        'enabled': False  # Set to True when you have real addresses
+    },
+    'gamma_vault': {
+        'address': '0x0000000000000000000000000000000000000000',  # Replace with actual vault address
+        'name': 'Gamma Vault',
+        'enabled': False  # Set to True when you have real addresses
+    },
+    'delta_vault': {
+        'address': '0x0000000000000000000000000000000000000000',  # Replace with actual vault address
+        'name': 'Delta Vault',
         'enabled': False  # Set to True when you have real addresses
     }
 }
@@ -112,22 +137,33 @@ async def get_hyperliquid_vault_data():
             print("📊 Using simulated vault data (configure real addresses in VAULT_CONFIG)...")
             
             # Use enhanced simulation based on real market data
-            vault_data = {
-                'martybit_vault': {
-                    'name': 'Martybit Vault',
-                    'entry_price': round(eth_price * 0.995, 2),
-                    'total_value': 68000,
-                    'eth_size': 18.5,  # Simulated ETH holdings
-                    'unrealized_pnl': 180.50
-                },
-                'opportunity_vault': {
-                    'name': 'Opportunity Vault',
-                    'entry_price': round(eth_price * 1.002, 2),
-                    'total_value': 48000,
-                    'eth_size': 13.1,  # Simulated ETH holdings
-                    'unrealized_pnl': -85.25
-                }
-            }
+            # Generate realistic data for all configured vaults
+            simulation_params = [
+                 {'multiplier': 0.995, 'value': 68000, 'size': 18.5},    # Martybit
+                 {'multiplier': 0.999, 'value': 82000, 'size': 22.3},    # Strategic DeFi
+                 {'multiplier': 1.002, 'value': 48000, 'size': 13.1},    # Opportunity  
+                 {'multiplier': 0.998, 'value': 95000, 'size': 25.8},    # Alpha
+                 {'multiplier': 1.001, 'value': 32000, 'size': 8.7},     # Beta
+                 {'multiplier': 0.993, 'value': 156000, 'size': 42.3},   # Gamma
+                 {'multiplier': 1.005, 'value': 74000, 'size': 20.1}     # Delta
+             ]
+            
+            vault_keys = list(VAULT_CONFIG.keys())
+            
+            for i, (vault_key, vault_config) in enumerate(VAULT_CONFIG.items()):
+                if i < len(simulation_params):
+                    params = simulation_params[i]
+                    entry_price = round(eth_price * params['multiplier'], 2)
+                    eth_size = params['size']
+                    unrealized_pnl = eth_size * (eth_price - entry_price)
+                    
+                    vault_data[vault_key] = {
+                        'name': vault_config['name'],
+                        'entry_price': entry_price,
+                        'total_value': params['value'],
+                        'eth_size': eth_size,
+                        'unrealized_pnl': unrealized_pnl
+                    }
         
         # Get order book data
         l2_book = info.l2_snapshot("ETH")
@@ -165,41 +201,46 @@ async def send_vault_monitor_alert():
     
     # Format the alert
     current_price = vault_data['current_eth_price']
-    martybit = vault_data['vaults']['martybit_vault']
-    opportunity = vault_data['vaults']['opportunity_vault']
+    vaults = vault_data['vaults']
     
-    # Calculate totals
-    total_value = martybit['total_value'] + opportunity['total_value']
-    total_pnl = martybit['unrealized_pnl'] + opportunity['unrealized_pnl']
-    
-    # Calculate PnL percentages
-    martybit_pnl_pct = ((current_price - martybit['entry_price']) / martybit['entry_price']) * 100 if martybit['entry_price'] > 0 else 0
-    opportunity_pnl_pct = ((current_price - opportunity['entry_price']) / opportunity['entry_price']) * 100 if opportunity['entry_price'] > 0 else 0
+    # Calculate totals across all vaults
+    total_value = sum(vault['total_value'] for vault in vaults.values())
+    total_pnl = sum(vault['unrealized_pnl'] for vault in vaults.values())
+    total_eth_size = sum(vault['eth_size'] for vault in vaults.values())
     
     now = datetime.now().strftime('%I:%M %p')
+    
+    # Build dynamic vault breakdown
+    vault_breakdown = []
+    vault_icons = ['🔸', '🔹', '🔺', '🔻', '🔷', '🔶']  # Different icons for each vault
+    
+    for i, (vault_key, vault) in enumerate(vaults.items()):
+        icon = vault_icons[i % len(vault_icons)]
+        pnl_pct = ((current_price - vault['entry_price']) / vault['entry_price']) * 100 if vault['entry_price'] > 0 else 0
+        
+        vault_section = f"""{icon} {vault['name']}
+   Entry: ${vault['entry_price']:,.2f}
+   Value: ${vault['total_value']:,}
+   Size: {vault['eth_size']:.2f} ETH
+   PnL: {pnl_pct:+.2f}% (${vault['unrealized_pnl']:+,.2f})"""
+        
+        vault_breakdown.append(vault_section)
+    
+    vault_breakdown_text = '\n\n'.join(vault_breakdown)
     
     message = f"""🚨 Vault Monitor Alert 🚨
 📊 Token: ETH
 💰 Current Price: ${current_price:,.2f}
 {data_source}
 
-🏦 VAULT BREAKDOWN:
+🏦 VAULT BREAKDOWN ({len(vaults)} vaults):
 ━━━━━━━━━━━━━━━━━━━━
-🔸 {martybit['name']}
-   Entry: ${martybit['entry_price']:,.2f}
-   Value: ${martybit['total_value']:,}
-   Size: {martybit['eth_size']:.2f} ETH
-   PnL: {martybit_pnl_pct:+.2f}% (${martybit['unrealized_pnl']:+,.2f})
-
-🔹 {opportunity['name']}
-   Entry: ${opportunity['entry_price']:,.2f}
-   Value: ${opportunity['total_value']:,}
-   Size: {opportunity['eth_size']:.2f} ETH
-   PnL: {opportunity_pnl_pct:+.2f}% (${opportunity['unrealized_pnl']:+,.2f})
+{vault_breakdown_text}
 
 ━━━━━━━━━━━━━━━━━━━━
 💰 Combined Total: ${total_value:,}
 📊 Total PnL: ${total_pnl:+,.2f}
+🪙 Total ETH: {total_eth_size:.2f} ETH
 📈 Market: ${vault_data['market_data']['bid']:.2f} / ${vault_data['market_data']['ask']:.2f}
 🕒 {now} | ⚡ Hyperliquid API"""
     
