@@ -29,7 +29,7 @@ namespace Core.Models
         }
     }
 
-    public class HyperliquidApiSnpashot
+    public class HyperliquidApiSnapshot
     {
         public MarginSummary MarginSummary { get; set; }
         public MarginSummary CrossMarginSummary { get; set; }

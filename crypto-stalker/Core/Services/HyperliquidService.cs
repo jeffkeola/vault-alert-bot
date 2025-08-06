@@ -1,5 +1,6 @@
 namespace Core.Services
 {
+    using System;
     using System.Text;
     using System.Text.Json;
 
@@ -11,7 +12,7 @@ namespace Core.Services
     {
         Task<HyperliquidSnapshot> GetLatestSnapshotAsync(HyperliquidUser user);
         Task<List<string>> RefreshAsync(HyperliquidUser user);
-        Task<HyperliquidApiSnpashot> GetApiSnapshotAsync(HyperliquidUser user);
+        Task<HyperliquidApiSnapshot> GetApiSnapshotAsync(HyperliquidUser user);
         Task<List<string>> GetLastChangeAsync(HyperliquidUser user);
 
         // Task CreateHyperliquidResponseAsync(HyperliquidInfoResponse response, HyperliquidUser user);
@@ -88,7 +89,7 @@ namespace Core.Services
             return ExtensionMethods.GetChangedPositions(user, previousSnapshot, newSnapshot);
         }
 
-        public async Task<HyperliquidApiSnpashot> GetApiSnapshotAsync(HyperliquidUser user)
+        public async Task<HyperliquidApiSnapshot> GetApiSnapshotAsync(HyperliquidUser user)
         {
             using (HttpClient client = HttpClientFactory.CreateClient("hyperliquid"))
             {
@@ -107,7 +108,7 @@ namespace Core.Services
                     string jsonResponse = await httpResponse.Content.ReadAsStringAsync();
                     Console.WriteLine("API Response: " + jsonResponse);
 
-                    return JsonSerializer.Deserialize<HyperliquidApiSnpashot>(jsonResponse, this.JsonOptions);
+                    return JsonSerializer.Deserialize<HyperliquidApiSnapshot>(jsonResponse, this.JsonOptions);
                 }
 
                 throw new Exception($"API Error: {httpResponse.StatusCode}");

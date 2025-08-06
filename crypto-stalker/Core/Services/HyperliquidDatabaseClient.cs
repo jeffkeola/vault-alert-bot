@@ -1,3 +1,4 @@
+using System;
 using System.Text.Json;
 
 using Core.Models;
@@ -59,7 +60,7 @@ namespace Core.Services
 
     public interface IHyperliquidDatabaseClient
     {
-        Task<HyperliquidSnapshot> CreateSnapshotAsync(HyperliquidApiSnpashot response, HyperliquidUser user);
+        Task<HyperliquidSnapshot> CreateSnapshotAsync(HyperliquidApiSnapshot response, HyperliquidUser user);
         Task<List<HyperliquidSnapshotSummary>> GetSnapshotSummariesAsync(string userId);
         Task<HyperliquidSnapshot> GetCurrentSnasphotAsync(HyperliquidUser user);
         Task<(HyperliquidSnapshot Current, HyperliquidSnapshot Previous)> GetCurrentAndPreviousSnasphotsAsync(HyperliquidUser user);
@@ -216,7 +217,7 @@ namespace Core.Services
             return (snapshots[0], snapshots[1]);
         }
 
-        public async Task<HyperliquidSnapshot> CreateSnapshotAsync(HyperliquidApiSnpashot response, HyperliquidUser user)
+        public async Task<HyperliquidSnapshot> CreateSnapshotAsync(HyperliquidApiSnapshot response, HyperliquidUser user)
         {
             var snapshotDto = await this.CreateSnapshotDtoAsync(response, user);
             var positions = await this.CreatePositionsAsync(response, snapshotDto);
@@ -271,7 +272,7 @@ namespace Core.Services
             }
             return summaries;
         }
-        private async Task<HyperliquidSnapshotDto> CreateSnapshotDtoAsync(HyperliquidApiSnpashot response, HyperliquidUser user)
+        private async Task<HyperliquidSnapshotDto> CreateSnapshotDtoAsync(HyperliquidApiSnapshot response, HyperliquidUser user)
         {
             using var conn = new SqlConnection(this.ConnectionString);
             conn.Open();
@@ -300,7 +301,7 @@ namespace Core.Services
 
             return snapshot;
         }
-        private async Task<List<HyperliquidPositionDto>> CreatePositionsAsync(HyperliquidApiSnpashot response, HyperliquidSnapshotDto snapshotDto)
+        private async Task<List<HyperliquidPositionDto>> CreatePositionsAsync(HyperliquidApiSnapshot response, HyperliquidSnapshotDto snapshotDto)
         {
             using var conn = new SqlConnection(this.ConnectionString);
             conn.Open();
