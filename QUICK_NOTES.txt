@@ -1,0 +1,32 @@
+JWOvaultbot - Quick Reference
+
+IMMEDIATE TODO:
+- Add vault addresses back (lost during restart)
+- Test first real confluence alert
+- Monitor Render logs for errors
+- Create GitHub backup release
+
+BOT COMMANDS TO REMEMBER:
+/start - Show welcome menu
+/status - Check bot health  
+/list_tracked - See tracked addresses
+/add_vault ADDRESS NAME - Track new vault
+/set_rule confluence 3 - Need 3 addresses for alert
+/set_rule min_value 1000 - $1000 minimum trade
+/start_monitoring - Begin tracking
+
+CURRENT SETTINGS:
+- Confluence: 2 addresses needed
+- Time window: 300 seconds (5 minutes)  
+- Min trade: $1000
+- Check frequency: 30 seconds
+
+TROUBLESHOOTING:
+- Bot not responding? Check Render dashboard
+- Too many alerts? Increase min_value or confluence count
+- Too few alerts? Decrease min_value or confluence count
+
+GOALS THIS WEEK:
+- Get first real confluence alert
+- Verify bot stability
+- Document which vault addresses work best
