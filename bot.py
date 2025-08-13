@@ -2,7 +2,6 @@ import asyncio
 import logging
 import json
 import time
-import aiohttp
 from decimal import Decimal
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Set, Tuple
