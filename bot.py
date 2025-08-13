@@ -234,7 +234,7 @@ class HyperliquidAdvancedBot:
                 "/remove\\_vault \\<name\\> \\- Remove vault by name\n"
                 "/status \\- Show bot status\n"
                 "/performance \\- Show API performance metrics\n"
-                "/set\\_confluence \\<number\\> \\- Set confluence threshold\n"
+                "/setvaults \\<number\\> \\- Set how many vaults needed for alert\n"
                 "/set\\_window \\<minutes\\> \\- Set confluence time window\n"
                 "/health \\- Show system health\n\n"
                 "*Professional Features:*\n"
@@ -394,29 +394,34 @@ class HyperliquidAdvancedBot:
             logger.error(f"Error in remove_vault command: {e}")
             await update.message.reply_text("Error removing vault. Please try again.")
     
-    async def set_confluence_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /set_confluence command"""
+    async def set_vault_number_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /setvaults command"""
         try:
             if not context.args:
-                await update.message.reply_text("Please provide number: /set\\_confluence \\<number\\>", parse_mode='MarkdownV2')
+                await update.message.reply_text("Please provide number: /setvaults \\<number\\>", parse_mode='MarkdownV2')
                 return
             
             try:
                 threshold = int(context.args[0])
                 if threshold < 1:
-                    await update.message.reply_text("❌ Confluence threshold must be at least 1")
+                    await update.message.reply_text("❌ Vault number must be at least 1")
                     return
                 
                 self.vault_data.confluence_threshold = threshold
                 escaped_threshold = escape_markdown_v2(str(threshold))
-                message = f"✅ Confluence threshold set to: *{escaped_threshold}* vault\\(s\\)"
+                
+                if threshold == 1:
+                    message = f"✅ Alert on: *ANY* vault trades \\({escaped_threshold} vault\\)"
+                else:
+                    message = f"✅ Alert when: *{escaped_threshold}* vaults trade same token"
+                
                 await update.message.reply_text(message, parse_mode='MarkdownV2')
-                logger.info(f"Confluence threshold set to: {threshold}")
+                logger.info(f"Vault threshold set to: {threshold}")
             except ValueError:
                 await update.message.reply_text("❌ Please provide a valid number")
         except Exception as e:
-            logger.error(f"Error in set_confluence command: {e}")
-            await update.message.reply_text("Error setting confluence threshold.")
+            logger.error(f"Error in setvaults command: {e}")
+            await update.message.reply_text("Error setting vault threshold.")
     
     async def set_window_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /set_window command"""
@@ -454,14 +459,21 @@ class HyperliquidAdvancedBot:
             vault_count = escape_markdown_v2(str(len(self.vault_data.vaults)))
             active_vaults = escape_markdown_v2(str(len(self.vault_data.get_active_vaults())))
             
+            # Friendly vault threshold description
+            if self.vault_data.confluence_threshold == 1:
+                vault_desc = "ANY vault"
+            else:
+                vault_desc = f"{self.vault_data.confluence_threshold} vaults"
+            escaped_vault_desc = escape_markdown_v2(vault_desc)
+            
             message = (
                 f"⚙️ *Bot Settings v2\\.0*\n\n"
                 f"*Status:* {status_icon} {status_text}\n"
                 f"*Monitored Vaults:* {active_vaults}/{vault_count}\n\n"
-                f"*Detection Settings:*\n"
-                f"• Confluence Threshold: {confluence_threshold} vault\\(s\\)\n"
-                f"• Confluence Window: {confluence_window} minute\\(s\\)\n"
-                f"• Anti\\-spam Cooldown: {cooldown} minute\\(s\\)\n\n"
+                f"*Alert Settings:*\n"
+                f"• Alert when: {escaped_vault_desc} trade same token\n"
+                f"• Time window: {confluence_window} minute\\(s\\)\n"
+                f"• Anti\\-spam cooldown: {cooldown} minute\\(s\\)\n\n"
                 f"*Professional Features:*\n"
                 f"• API Timeout: {BotConfig.API_TIMEOUT_SECONDS}s\n"
                 f"• Max Retries: {BotConfig.MAX_RETRIES}\n"
@@ -476,7 +488,7 @@ class HyperliquidAdvancedBot:
                 f"Bot Settings v2.0:\n"
                 f"Status: {'Active' if self.vault_data.is_monitoring else 'Stopped'}\n"
                 f"Vaults: {len(self.vault_data.get_active_vaults())}/{len(self.vault_data.vaults)}\n"
-                f"Confluence: {self.vault_data.confluence_threshold} vaults\n"
+                f"Alert when: {self.vault_data.confluence_threshold} vaults trade same token\n"
                 f"Window: {self.vault_data.confluence_window_minutes} minutes\n"
                 f"API Timeout: {BotConfig.API_TIMEOUT_SECONDS}s"
             )
@@ -884,7 +896,7 @@ async def main():
     application.add_handler(CommandHandler("status", vault_bot.status_command))
     application.add_handler(CommandHandler("performance", vault_bot.performance_command))
     application.add_handler(CommandHandler("health", vault_bot.health_command))
-    application.add_handler(CommandHandler("set_confluence", vault_bot.set_confluence_command))
+    application.add_handler(CommandHandler("setvaults", vault_bot.set_vault_number_command))
     application.add_handler(CommandHandler("set_window", vault_bot.set_window_command))
     application.add_handler(CommandHandler("show_settings", vault_bot.show_settings_command))
     
