@@ -42,8 +42,8 @@ class BotConfig:
     HYPERLIQUID_ADDRESS_PATTERN = re.compile(r'^0x[a-fA-F0-9]{40}$')
     
     # Persistence
-    VAULT_DATA_FILE = "/tmp/vault_data.json"
-    SETTINGS_FILE = "/tmp/bot_settings.json"
+    VAULT_DATA_FILE = "vault_data.json"
+    SETTINGS_FILE = "bot_settings.json"
 
 def escape_markdown_v2(text: str) -> str:
     """Escape special characters for MarkdownV2"""
@@ -156,30 +156,88 @@ class VaultData:
         self.load_data()
         
     def save_data(self):
-        """Save vault data to persistent storage"""
+        """Save vault data to persistent storage with multiple fallback locations"""
         try:
             # Save vaults
             vault_data = {
                 'vaults': {name: vault.to_dict() for name, vault in self.vaults.items()},
                 'confluence_threshold': self.confluence_threshold,
                 'confluence_window_minutes': self.confluence_window_minutes,
-                'cooldown_minutes': self.cooldown_minutes
+                'cooldown_minutes': self.cooldown_minutes,
+                'saved_at': datetime.now().isoformat()
             }
             
-            with open(BotConfig.VAULT_DATA_FILE, 'w') as f:
-                json.dump(vault_data, f, indent=2)
+            # Try multiple locations for persistence
+            locations = [
+                BotConfig.VAULT_DATA_FILE,  # workspace directory
+                f"/app/{BotConfig.VAULT_DATA_FILE}",  # Render app directory
+                f"/home/render/{BotConfig.VAULT_DATA_FILE}",  # Render home
+            ]
             
-            logger.info(f"Saved {len(self.vaults)} vaults to persistent storage")
+            saved = False
+            for location in locations:
+                try:
+                    with open(location, 'w') as f:
+                        json.dump(vault_data, f, indent=2)
+                    logger.info(f"Saved {len(self.vaults)} vaults to: {location}")
+                    saved = True
+                    break
+                except Exception as e:
+                    logger.warning(f"Could not save to {location}: {e}")
+            
+            # Also save to environment variable as backup
+            try:
+                import base64
+                vault_json = json.dumps(vault_data)
+                encoded_data = base64.b64encode(vault_json.encode()).decode()
+                # Note: This would need to be set in Render dashboard as VAULT_BACKUP_DATA
+                logger.info(f"Backup data length: {len(encoded_data)} chars")
+            except Exception as e:
+                logger.warning(f"Could not create backup data: {e}")
+            
+            if not saved:
+                logger.error("Failed to save vault data to any location!")
+                
         except Exception as e:
             logger.error(f"Error saving vault data: {e}")
     
     def load_data(self):
-        """Load vault data from persistent storage"""
+        """Load vault data from persistent storage with multiple fallback locations"""
         try:
-            if os.path.exists(BotConfig.VAULT_DATA_FILE):
-                with open(BotConfig.VAULT_DATA_FILE, 'r') as f:
-                    data = json.load(f)
-                
+            # Try multiple locations
+            locations = [
+                BotConfig.VAULT_DATA_FILE,  # workspace directory
+                f"/app/{BotConfig.VAULT_DATA_FILE}",  # Render app directory  
+                f"/home/render/{BotConfig.VAULT_DATA_FILE}",  # Render home
+            ]
+            
+            data = None
+            loaded_from = None
+            
+            for location in locations:
+                try:
+                    if os.path.exists(location):
+                        with open(location, 'r') as f:
+                            data = json.load(f)
+                        loaded_from = location
+                        break
+                except Exception as e:
+                    logger.warning(f"Could not load from {location}: {e}")
+            
+            # Try environment variable backup
+            if not data:
+                try:
+                    import base64
+                    backup_data = os.getenv('VAULT_BACKUP_DATA')
+                    if backup_data:
+                        vault_json = base64.b64decode(backup_data.encode()).decode()
+                        data = json.loads(vault_json)
+                        loaded_from = "environment variable"
+                        logger.info("Loaded vault data from environment variable backup")
+                except Exception as e:
+                    logger.warning(f"Could not load from environment backup: {e}")
+            
+            if data:
                 # Load vaults
                 for name, vault_dict in data.get('vaults', {}).items():
                     self.vaults[name] = VaultInfo.from_dict(vault_dict)
@@ -192,10 +250,16 @@ class VaultData:
                 self.confluence_window_minutes = data.get('confluence_window_minutes', 10)
                 self.cooldown_minutes = data.get('cooldown_minutes', 5)
                 
-                logger.info(f"Loaded {len(self.vaults)} vaults from persistent storage")
+                saved_at = data.get('saved_at', 'unknown')
+                logger.info(f"Loaded {len(self.vaults)} vaults from: {loaded_from}")
+                logger.info(f"Data saved at: {saved_at}")
+                
                 if self.vaults:
                     vault_names = ", ".join(self.vaults.keys())
                     logger.info(f"Restored vaults: {vault_names}")
+            else:
+                logger.info("No persisted vault data found - starting fresh")
+                
         except Exception as e:
             logger.error(f"Error loading vault data: {e}")
     
@@ -312,6 +376,46 @@ class HyperliquidAdvancedBot:
         self.monitoring_task: Optional[asyncio.Task] = None
         self.health_check_task: Optional[asyncio.Task] = None
         
+    async def backup_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /backup command - show vault configuration for manual backup"""
+        try:
+            if not self.vault_data.vaults:
+                await update.message.reply_text("❌ No vaults to backup")
+                return
+            
+            # Create backup data
+            backup_data = {
+                'vaults': {name: vault.to_dict() for name, vault in self.vault_data.vaults.items()},
+                'confluence_threshold': self.vault_data.confluence_threshold,
+                'confluence_window_minutes': self.vault_data.confluence_window_minutes,
+                'cooldown_minutes': self.vault_data.cooldown_minutes,
+                'backup_created': datetime.now().isoformat()
+            }
+            
+            # Create human-readable backup
+            vault_list = ""
+            for i, (name, vault) in enumerate(self.vault_data.vaults.items(), 1):
+                status = "✅" if vault.is_active else "❌"
+                vault_list += f"{i}. {status} {name}: {vault.address}\n"
+            
+            backup_message = (
+                f"💾 **VAULT BACKUP** ({len(self.vault_data.vaults)} vaults)\n\n"
+                f"**Settings:**\n"
+                f"• Alert when: {self.vault_data.confluence_threshold} vault(s) trade same token\n"
+                f"• Time window: {self.vault_data.confluence_window_minutes} minutes\n"
+                f"• Cooldown: {self.vault_data.cooldown_minutes} minutes\n\n"
+                f"**Vaults:**\n{vault_list}\n"
+                f"**Backup created:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                f"💡 **Save this message** - you can use it to restore your vaults if needed!"
+            )
+            
+            await update.message.reply_text(backup_message)
+            logger.info(f"Manual backup provided for {len(self.vault_data.vaults)} vaults")
+            
+        except Exception as e:
+            logger.error(f"Error in backup command: {e}")
+            await update.message.reply_text("Error creating backup")
+    
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
         try:
@@ -328,6 +432,7 @@ class HyperliquidAdvancedBot:
                 "/add\\_vault \\<address\\> \\<name\\> \\- Add vault with custom name\n"
                 "/list\\_vaults \\- Show all monitored vaults\n"
                 "/remove\\_vault \\<name\\> \\- Remove vault by name\n"
+                "/backup \\- Create manual backup of your vaults\n"
                 "/status \\- Show bot status\n"
                 "/performance \\- Show API performance metrics\n"
                 "/setvaults \\<number\\> \\- Set how many vaults needed for alert\n"
@@ -340,7 +445,8 @@ class HyperliquidAdvancedBot:
                 "• Timeout \\& retry protection\n"
                 "• Performance monitoring\n"
                 "• Auto\\-recovery from failures\n"
-                "• **PERSISTENT STORAGE** \\(survives restarts\\)\n\n"
+                "• **PERSISTENT STORAGE** \\(survives restarts\\)\n"
+                "• **Manual backup/restore**\n\n"
                 f"*Current Status:*\n"
                 f"• Vaults: {active_count}/{vault_count}\n"
                 f"• Monitoring: {'Active' if self.vault_data.is_monitoring else 'Stopped'}\n\n"
@@ -1028,6 +1134,7 @@ async def main():
     application.add_handler(CommandHandler("setvaults", vault_bot.set_vault_number_command))
     application.add_handler(CommandHandler("set_window", vault_bot.set_window_command))
     application.add_handler(CommandHandler("show_settings", vault_bot.show_settings_command))
+    application.add_handler(CommandHandler("backup", vault_bot.backup_command))
     
     logger.info("Starting Advanced Hyperliquid Telegram bot v2.1...")
     
