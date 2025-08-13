@@ -864,19 +864,37 @@ class HyperliquidAdvancedBot:
                         timestamp=datetime.now()
                     )
                     
-                    # Add to trade events for confluence tracking
+                    # Check confluence BEFORE adding the current event (so it doesn't count itself)
+                    existing_confluence_events = self.vault_data.get_confluence_events(coin, trade_event.timestamp)
+                    existing_unique_vaults = len(set(e.vault_name for e in existing_confluence_events))
+                    
+                    # Debug logging for confluence detection
+                    if existing_confluence_events:
+                        existing_vault_names = [e.vault_name for e in existing_confluence_events]
+                        logger.info(f"Confluence check for {coin}: Found {existing_unique_vaults} existing vault(s): {existing_vault_names}")
+                        for event in existing_confluence_events:
+                            minutes_ago = (trade_event.timestamp - event.timestamp).total_seconds() / 60
+                            logger.info(f"  - {event.vault_name}: {event.trade_type} {event.size_change} size, {minutes_ago:.1f} minutes ago")
+                    
+                    # Add current event to the count (but not to the list yet)
+                    total_unique_vaults = existing_unique_vaults
+                    current_vault_already_counted = any(e.vault_name == vault_info.name for e in existing_confluence_events)
+                    if not current_vault_already_counted:
+                        total_unique_vaults += 1
+                    
+                    logger.info(f"Confluence for {coin}: {existing_unique_vaults} existing + {vault_info.name} = {total_unique_vaults} total (threshold: {self.vault_data.confluence_threshold})")
+                    
+                    # Add to trade events for confluence tracking (after confluence check)
                     self.vault_data.add_trade_event(trade_event)
                     
-                    # Check confluence
-                    confluence_events = self.vault_data.get_confluence_events(coin, trade_event.timestamp)
-                    unique_vaults = len(set(e.vault_name for e in confluence_events))
-                    
                     # Only alert if confluence threshold is met
-                    if unique_vaults >= self.vault_data.confluence_threshold:
-                        await self.send_confluence_alert(trade_event, confluence_events)
+                    if total_unique_vaults >= self.vault_data.confluence_threshold:
+                        # Get the final confluence events including the current one for the alert
+                        all_confluence_events = self.vault_data.get_confluence_events(coin, trade_event.timestamp)
+                        await self.send_confluence_alert(trade_event, all_confluence_events)
                         
                         # Set cooldown for all involved vaults
-                        for event in confluence_events:
+                        for event in all_confluence_events:
                             vault = self.vault_data.get_vault_by_name(event.vault_name)
                             if vault:
                                 self.vault_data.set_cooldown(vault.address, coin)
