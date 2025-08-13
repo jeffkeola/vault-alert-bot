@@ -1,1 +1,5 @@
-python-telegram-bot==13.15
+python-telegram-bot==20.6
+hyperliquid-python-sdk==0.1.15
+asyncio
+aiohttp==3.9.1
+typing-extensions==4.8.0

@@ -1,30 +1,32 @@
+#!/usr/bin/env python3
+"""
+Hyperliquid Advanced Position Monitor - Main Entry Point
+Launches the advanced Telegram bot with position size tracking and confluence detection.
+"""
+
+import asyncio
+import sys
 import os
-import time
-import telegram
-from datetime import datetime
-
-# Environment variables
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
-# Initialize bot
-bot = telegram.Bot(token=TELEGRAM_TOKEN)
-
-def send_startup_message():
-    """Send a message indicating the bot is live."""
-    bot.send_message(chat_id=CHAT_ID, text="✅ Vault alert bot is LIVE and sending messages.")
-
-def send_alert():
-    """Send a vault confluence alert message."""
-    now = datetime.now().strftime('%I:%M %p')
-    message = f"🚨 Vault Confluence Alert 🚨\nToken: ETH\nDirection: LONG OPEN\nVaults: Martybit, Opportunity Vault\nEntry Price: $3200\nTotal Value: $116,000\n🕒 Timestamp: {now}"
-    bot.send_message(chat_id=CHAT_ID, text=message)
+from bot import main
 
 if __name__ == "__main__":
-    # Send startup notification
-    send_startup_message()
+    print("🚀 Starting Advanced Hyperliquid Position Monitor...")
+    print("Features: Position SIZE tracking, Confluence detection, Anti-spam protection")
     
-    # Send the alert
-    send_alert()
+    # Check environment variables
+    if not os.getenv('TELEGRAM_BOT_TOKEN'):
+        print("❌ ERROR: TELEGRAM_BOT_TOKEN environment variable not set")
+        sys.exit(1)
     
-    print("Bot execution completed successfully!")
+    if not os.getenv('TELEGRAM_CHAT_ID'):
+        print("❌ ERROR: TELEGRAM_CHAT_ID environment variable not set")
+        sys.exit(1)
+    
+    try:
+        # Run the advanced bot
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n🛑 Bot stopped by user")
+    except Exception as e:
+        print(f"❌ Bot error: {e}")
+        sys.exit(1)
