@@ -40,6 +40,10 @@ class BotConfig:
     
     # Address validation
     HYPERLIQUID_ADDRESS_PATTERN = re.compile(r'^0x[a-fA-F0-9]{40}$')
+    
+    # Persistence
+    VAULT_DATA_FILE = "/tmp/vault_data.json"
+    SETTINGS_FILE = "/tmp/bot_settings.json"
 
 def escape_markdown_v2(text: str) -> str:
     """Escape special characters for MarkdownV2"""
@@ -58,6 +62,31 @@ class VaultInfo:
     
     def __str__(self):
         return f"{self.name} ({self.address[:8]}...{self.address[-6:]})"
+    
+    def to_dict(self):
+        """Convert to dictionary for JSON serialization"""
+        return {
+            'address': self.address,
+            'name': self.name,
+            'last_successful_check': self.last_successful_check.isoformat() if self.last_successful_check else None,
+            'consecutive_failures': self.consecutive_failures,
+            'is_active': self.is_active
+        }
+    
+    @classmethod
+    def from_dict(cls, data):
+        """Create from dictionary for JSON deserialization"""
+        last_check = None
+        if data.get('last_successful_check'):
+            last_check = datetime.fromisoformat(data['last_successful_check'])
+        
+        return cls(
+            address=data['address'],
+            name=data['name'],
+            last_successful_check=last_check,
+            consecutive_failures=data.get('consecutive_failures', 0),
+            is_active=data.get('is_active', True)
+        )
 
 @dataclass
 class PositionData:
@@ -123,6 +152,53 @@ class VaultData:
         self.confluence_window_minutes = 10  # Time window for confluence detection
         self.cooldown_minutes = 5  # Anti-spam cooldown per token per vault
         
+        # Load persisted data
+        self.load_data()
+        
+    def save_data(self):
+        """Save vault data to persistent storage"""
+        try:
+            # Save vaults
+            vault_data = {
+                'vaults': {name: vault.to_dict() for name, vault in self.vaults.items()},
+                'confluence_threshold': self.confluence_threshold,
+                'confluence_window_minutes': self.confluence_window_minutes,
+                'cooldown_minutes': self.cooldown_minutes
+            }
+            
+            with open(BotConfig.VAULT_DATA_FILE, 'w') as f:
+                json.dump(vault_data, f, indent=2)
+            
+            logger.info(f"Saved {len(self.vaults)} vaults to persistent storage")
+        except Exception as e:
+            logger.error(f"Error saving vault data: {e}")
+    
+    def load_data(self):
+        """Load vault data from persistent storage"""
+        try:
+            if os.path.exists(BotConfig.VAULT_DATA_FILE):
+                with open(BotConfig.VAULT_DATA_FILE, 'r') as f:
+                    data = json.load(f)
+                
+                # Load vaults
+                for name, vault_dict in data.get('vaults', {}).items():
+                    self.vaults[name] = VaultInfo.from_dict(vault_dict)
+                    # Initialize empty position tracking
+                    self.previous_positions[vault_dict['address']] = {}
+                    self.last_alerts[vault_dict['address']] = {}
+                
+                # Load settings
+                self.confluence_threshold = data.get('confluence_threshold', 1)
+                self.confluence_window_minutes = data.get('confluence_window_minutes', 10)
+                self.cooldown_minutes = data.get('cooldown_minutes', 5)
+                
+                logger.info(f"Loaded {len(self.vaults)} vaults from persistent storage")
+                if self.vaults:
+                    vault_names = ", ".join(self.vaults.keys())
+                    logger.info(f"Restored vaults: {vault_names}")
+        except Exception as e:
+            logger.error(f"Error loading vault data: {e}")
+    
     def add_vault(self, address: str, name: str) -> Tuple[bool, str]:
         """Add a vault with validation"""
         # Validate address format
@@ -141,6 +217,10 @@ class VaultData:
         self.vaults[name] = VaultInfo(address, name)
         self.previous_positions[address] = {}
         self.last_alerts[address] = {}
+        
+        # Save to persistent storage
+        self.save_data()
+        
         logger.info(f"Added vault: {name} ({address})")
         return True, f"Successfully added vault '{name}'."
     
@@ -151,6 +231,11 @@ class VaultData:
             del self.vaults[name]
             self.previous_positions.pop(vault_info.address, None)
             self.last_alerts.pop(vault_info.address, None)
+            
+            # Save to persistent storage
+            self.save_data()
+            
+            logger.info(f"Removed vault: {name}")
             return True
         return False
     
@@ -174,6 +259,8 @@ class VaultData:
                 if vault.consecutive_failures >= 3:
                     vault.is_active = False
                     logger.warning(f"Deactivating vault {vault.name} after {vault.consecutive_failures} failures")
+                # Save state changes
+                self.save_data()
                 break
     
     def mark_vault_success(self, vault_address: str):
@@ -183,6 +270,8 @@ class VaultData:
                 vault.consecutive_failures = 0
                 vault.last_successful_check = datetime.now()
                 vault.is_active = True
+                # Save state changes
+                self.save_data()
                 break
     
     def is_cooldown_active(self, vault_address: str, coin: str) -> bool:
@@ -226,8 +315,15 @@ class HyperliquidAdvancedBot:
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
         try:
+            # Auto-start monitoring if vaults exist
+            if self.vault_data.vaults and not self.vault_data.is_monitoring:
+                await self.start_monitoring()
+            
+            vault_count = len(self.vault_data.vaults)
+            active_count = len(self.vault_data.get_active_vaults())
+            
             welcome_message = (
-                "🤖 *Advanced Hyperliquid Position Monitor v2\\.0*\n\n"
+                "🤖 *Advanced Hyperliquid Position Monitor v2\\.1*\n\n"
                 "*Commands:*\n"
                 "/add\\_vault \\<address\\> \\<name\\> \\- Add vault with custom name\n"
                 "/list\\_vaults \\- Show all monitored vaults\n"
@@ -243,14 +339,18 @@ class HyperliquidAdvancedBot:
                 "• Anti\\-spam protection \\(5min cooldowns\\)\n"
                 "• Timeout \\& retry protection\n"
                 "• Performance monitoring\n"
-                "• Auto\\-recovery from failures\n\n"
+                "• Auto\\-recovery from failures\n"
+                "• **PERSISTENT STORAGE** \\(survives restarts\\)\n\n"
+                f"*Current Status:*\n"
+                f"• Vaults: {active_count}/{vault_count}\n"
+                f"• Monitoring: {'Active' if self.vault_data.is_monitoring else 'Stopped'}\n\n"
                 "Start by adding vaults with /add\\_vault\\!"
             )
             await update.message.reply_text(welcome_message, parse_mode='MarkdownV2')
             logger.info(f"Start command executed by user {update.effective_user.id}")
         except Exception as e:
             logger.error(f"Error in start command: {e}")
-            await update.message.reply_text("Welcome to Advanced Hyperliquid Monitor v2.0! Use /add_vault <address> <name> to start.")
+            await update.message.reply_text("Welcome to Advanced Hyperliquid Monitor v2.1! Use /add_vault <address> <name> to start.")
     
     async def add_vault_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /add_vault command with validation"""
@@ -271,7 +371,7 @@ class HyperliquidAdvancedBot:
             if success:
                 escaped_name = escape_markdown_v2(name)
                 escaped_address = escape_markdown_v2(f"{address[:8]}...{address[-6:]}")
-                response_message = f"✅ Added vault: *{escaped_name}* \\(`{escaped_address}`\\)\n\nValidation: ✅ Address format\nStatus: Monitoring will begin automatically\\."
+                response_message = f"✅ Added vault: *{escaped_name}* \\(`{escaped_address}`\\)\n\nValidation: ✅ Address format\nPersistence: ✅ Saved to storage\nStatus: Monitoring will begin automatically\\."
                 await update.message.reply_text(response_message, parse_mode='MarkdownV2')
                 
                 # Start monitoring if not already running
@@ -303,9 +403,9 @@ class HyperliquidAdvancedBot:
                 f"*Failed Calls:* {failed_calls}\n"
                 f"*Avg Response Time:* {avg_time}\n\n"
                 f"*Thresholds:*\n"
-                f"• Max Response Time: {BotConfig.MAX_API_RESPONSE_TIME}s\n"
-                f"• Timeout: {BotConfig.API_TIMEOUT_SECONDS}s\n"
-                f"• Max Retries: {BotConfig.MAX_RETRIES}"
+                f"• Max Response Time: {escape_markdown_v2(str(BotConfig.MAX_API_RESPONSE_TIME))}s\n"
+                f"• Timeout: {escape_markdown_v2(str(BotConfig.API_TIMEOUT_SECONDS))}s\n"
+                f"• Max Retries: {escape_markdown_v2(str(BotConfig.MAX_RETRIES))}"
             )
             await update.message.reply_text(message, parse_mode='MarkdownV2')
         except Exception as e:
@@ -313,7 +413,7 @@ class HyperliquidAdvancedBot:
             await update.message.reply_text("Error retrieving performance metrics.")
     
     async def health_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /health command"""
+        """Handle /health command with proper escaping"""
         try:
             active_vaults = len(self.vault_data.get_active_vaults())
             total_vaults = len(self.vault_data.vaults)
@@ -322,24 +422,38 @@ class HyperliquidAdvancedBot:
             # Check for problematic vaults
             problematic_vaults = [v for v in self.vault_data.vaults.values() if v.consecutive_failures > 0]
             
+            # Properly escape all values
+            escaped_monitoring = escape_markdown_v2(monitoring_status)
+            escaped_success_rate = escape_markdown_v2(f"{self.vault_data.performance.success_rate:.1f}%")
+            
             health_message = (
                 f"🏥 *System Health Check*\n\n"
-                f"*Monitoring:* {monitoring_status}\n"
+                f"*Monitoring:* {escaped_monitoring}\n"
                 f"*Active Vaults:* {active_vaults}/{total_vaults}\n"
-                f"*API Success Rate:* {self.vault_data.performance.success_rate:.1f}%\n"
+                f"*API Success Rate:* {escaped_success_rate}\n"
+                f"*Persistent Storage:* ✅ Enabled\n"
             )
             
             if problematic_vaults:
                 health_message += f"\n⚠️ *Issues Detected:*\n"
                 for vault in problematic_vaults[:3]:  # Show max 3
-                    health_message += f"• {vault.name}: {vault.consecutive_failures} failures\n"
+                    escaped_vault_name = escape_markdown_v2(vault.name)
+                    health_message += f"• {escaped_vault_name}: {vault.consecutive_failures} failures\n"
             else:
                 health_message += f"\n✅ *All systems healthy*"
             
             await update.message.reply_text(health_message, parse_mode='MarkdownV2')
         except Exception as e:
             logger.error(f"Error in health command: {e}")
-            await update.message.reply_text("Error retrieving health status.")
+            # Fallback to plain text
+            health_message = (
+                f"System Health Check:\n"
+                f"Monitoring: {'Active' if self.vault_data.is_monitoring else 'Stopped'}\n"
+                f"Active Vaults: {len(self.vault_data.get_active_vaults())}/{len(self.vault_data.vaults)}\n"
+                f"API Success Rate: {self.vault_data.performance.success_rate:.1f}%\n"
+                f"Persistent Storage: Enabled"
+            )
+            await update.message.reply_text(health_message)
     
     async def list_vaults_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /list_vaults command"""
@@ -841,25 +955,27 @@ class HyperliquidAdvancedBot:
                 start_time = escape_markdown_v2(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
                 
                 startup_message = (
-                    f"🚀 *Professional Monitoring Started v2\\.0*\n\n"
+                    f"🚀 *Professional Monitoring Started v2\\.1*\n\n"
                     f"*Configuration:*\n"
                     f"• Total Vaults: {vault_count}\n"
                     f"• Active Vaults: {active_count}\n"
-                    f"• Confluence: {confluence_threshold} vault\\(s\\)\n"
-                    f"• Window: {confluence_window} minute\\(s\\)\n"
+                    f"• Alert when: {confluence_threshold} vault\\(s\\) trade same token\n"
+                    f"• Time window: {confluence_window} minute\\(s\\)\n"
                     f"• Tracking: Position SIZE changes\n"
                     f"• Anti\\-spam: 5min cooldowns\n\n"
                     f"*Professional Features:*\n"
-                    f"• API Timeout: {BotConfig.API_TIMEOUT_SECONDS}s\n"
-                    f"• Auto\\-retry: {BotConfig.MAX_RETRIES} attempts\n"
+                    f"• API Timeout: {escape_markdown_v2(str(BotConfig.API_TIMEOUT_SECONDS))}s\n"
+                    f"• Auto\\-retry: {escape_markdown_v2(str(BotConfig.MAX_RETRIES))} attempts\n"
                     f"• Health monitoring: Enabled\n"
-                    f"• Performance tracking: Active\n\n"
+                    f"• Performance tracking: Active\n"
+                    f"• **Persistent storage: Enabled**\n\n"
                     f"*Started:* {start_time}"
                 )
                 await self.send_alert(startup_message)
+                logger.info("Professional monitoring started with persistent storage")
             except Exception as e:
                 logger.error(f"Error sending startup message: {e}")
-                await self.send_alert("🚀 Professional vault monitoring v2.0 started!")
+                await self.send_alert("🚀 Professional vault monitoring v2.1 started with persistent storage!")
     
     async def stop_monitoring(self):
         """Stop the monitoring process"""
@@ -880,6 +996,7 @@ class HyperliquidAdvancedBot:
                 pass
             self.health_check_task = None
 
+# Add auto-start logic to main function
 async def main():
     # Get environment variables
     telegram_bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -892,10 +1009,15 @@ async def main():
     # Create professional bot instance
     vault_bot = HyperliquidAdvancedBot(telegram_bot_token, chat_id)
     
+    # Auto-start monitoring if vaults exist from previous session
+    if vault_bot.vault_data.vaults and not vault_bot.vault_data.is_monitoring:
+        logger.info(f"Auto-starting monitoring for {len(vault_bot.vault_data.vaults)} persisted vaults")
+        await vault_bot.start_monitoring()
+    
     # Create Telegram application
     application = Application.builder().token(telegram_bot_token).build()
     
-    # Add command handlers
+    # Add command handlers (keeping existing ones)
     application.add_handler(CommandHandler("start", vault_bot.start_command))
     application.add_handler(CommandHandler("add_vault", vault_bot.add_vault_command))
     application.add_handler(CommandHandler("list_vaults", vault_bot.list_vaults_command))
@@ -907,7 +1029,7 @@ async def main():
     application.add_handler(CommandHandler("set_window", vault_bot.set_window_command))
     application.add_handler(CommandHandler("show_settings", vault_bot.show_settings_command))
     
-    logger.info("Starting Advanced Hyperliquid Telegram bot v2.0...")
+    logger.info("Starting Advanced Hyperliquid Telegram bot v2.1...")
     
     try:
         # Start the bot
