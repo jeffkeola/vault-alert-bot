@@ -389,7 +389,14 @@ class HyperliquidAdvancedBot:
                 await update.message.reply_text(message, parse_mode='MarkdownV2')
                 logger.info(f"Removed vault: {name}")
             else:
-                await update.message.reply_text("❌ Vault not found")
+                # Show available vaults to help user
+                available_vaults = list(self.vault_data.vaults.keys())
+                if available_vaults:
+                    vault_list = ", ".join(available_vaults[:5])  # Show max 5
+                    message = f"❌ Vault '{name}' not found.\n\nAvailable vaults: {vault_list}\n\nNote: Names are case-sensitive!"
+                else:
+                    message = "❌ No vaults are currently monitored."
+                await update.message.reply_text(message)
         except Exception as e:
             logger.error(f"Error in remove_vault command: {e}")
             await update.message.reply_text("Error removing vault. Please try again.")
