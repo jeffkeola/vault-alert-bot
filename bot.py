@@ -138,6 +138,118 @@ class TradeEvent:
         else:
             return "DECREASE"
 
+@dataclass  
+class ThemeEvent:
+    """Event representing theme-based trading activity"""
+    theme: str
+    vault_name: str
+    vault_address: str
+    coin: str
+    trade_type: str
+    size_change: Decimal
+    timestamp: datetime
+    
+    def to_dict(self):
+        return {
+            'theme': self.theme,
+            'vault_name': self.vault_name,
+            'vault_address': self.vault_address,
+            'coin': self.coin,
+            'trade_type': self.trade_type,
+            'size_change': float(self.size_change),
+            'timestamp': self.timestamp.isoformat()
+        }
+
+class TokenCategorizer:
+    """Advanced token categorization system for theme detection"""
+    
+    def __init__(self):
+        # Comprehensive token categories based on current market themes
+        self.categories = {
+            'AI': {
+                'tokens': ['ARKM', 'FET', 'RNDR', 'TAO', 'OCEAN', 'GLM', 'AI', 'AGIX', 'PHB', 'CTX', 'AKT', 'NMR'],
+                'keywords': ['artificial', 'intelligence', 'neural', 'compute', 'render', 'machine', 'learning'],
+                'emoji': '🤖'
+            },
+            'GAMING': {
+                'tokens': ['IMX', 'GALA', 'SAND', 'MANA', 'AXS', 'ILV', 'ENJ', 'FLOW', 'RON', 'YGG', 'PIXEL', 'BEAM'],
+                'keywords': ['game', 'gaming', 'metaverse', 'nft', 'play', 'virtual'],
+                'emoji': '🎮'
+            },
+            'DEFI': {
+                'tokens': ['UNI', 'AAVE', 'SNX', 'CRV', 'COMP', 'YFI', 'BAL', '1INCH', 'DYDX', 'GMX', 'GNS', 'JOE'],
+                'keywords': ['defi', 'swap', 'yield', 'farm', 'lending', 'dex', 'protocol'],
+                'emoji': '🏦'
+            },
+            'MEME': {
+                'tokens': ['DOGE', 'SHIB', 'PEPE', 'FLOKI', 'BONK', 'WIF', 'BOME', 'POPCAT', 'MEW', 'PNUT'],
+                'keywords': ['meme', 'dog', 'cat', 'frog', 'community'],
+                'emoji': '🐸'
+            },
+            'LAYER1': {
+                'tokens': ['BTC', 'ETH', 'SOL', 'ADA', 'DOT', 'ATOM', 'NEAR', 'FTM', 'ALGO', 'MATIC', 'AVAX', 'LUNA'],
+                'keywords': ['blockchain', 'layer1', 'consensus', 'validator'],
+                'emoji': '⛓️'
+            },
+            'LAYER2': {
+                'tokens': ['ARB', 'OP', 'MATIC', 'LRC', 'ZK', 'METIS', 'BOBA', 'MANTA'],
+                'keywords': ['layer2', 'scaling', 'rollup', 'zk'],
+                'emoji': '🔗'
+            },
+            'ORACLES': {
+                'tokens': ['LINK', 'BAND', 'TRB', 'API3', 'UMA', 'DIA'],
+                'keywords': ['oracle', 'data', 'feed', 'price'],
+                'emoji': '🔮'
+            },
+            'INFRASTRUCTURE': {
+                'tokens': ['GRT', 'FIL', 'AR', 'STORJ', 'THETA', 'LPT', 'ANKR'],
+                'keywords': ['infrastructure', 'storage', 'network', 'node'],
+                'emoji': '🏗️'
+            },
+            'PRIVACY': {
+                'tokens': ['XMR', 'ZEC', 'SCRT', 'ROSE', 'NYM', 'RAIL'],
+                'keywords': ['privacy', 'anonymous', 'secret', 'zero'],
+                'emoji': '🕵️'
+            },
+            'RWA': {
+                'tokens': ['RIO', 'TRU', 'CFG', 'MKR', 'RWA', 'ONDO', 'POLYX'],
+                'keywords': ['real', 'world', 'asset', 'tokeniz', 'rwa'],
+                'emoji': '🏠'
+            }
+        }
+        
+        # Create reverse lookup for faster categorization
+        self.token_to_category = {}
+        for category, data in self.categories.items():
+            for token in data['tokens']:
+                self.token_to_category[token.upper()] = category
+                
+    def get_token_category(self, token: str) -> Optional[str]:
+        """Get category for a specific token"""
+        token_upper = token.upper()
+        return self.token_to_category.get(token_upper)
+    
+    def get_category_emoji(self, category: str) -> str:
+        """Get emoji for a category"""
+        return self.categories.get(category, {}).get('emoji', '📊')
+        
+    def get_all_categories(self) -> List[str]:
+        """Get list of all available categories"""
+        return list(self.categories.keys())
+    
+    def add_custom_token(self, token: str, category: str):
+        """Add a custom token to a category"""
+        token_upper = token.upper()
+        if category in self.categories:
+            if token_upper not in self.categories[category]['tokens']:
+                self.categories[category]['tokens'].append(token_upper)
+            self.token_to_category[token_upper] = category
+            logger.info(f"Added {token_upper} to {category} category")
+    
+    def get_category_tokens(self, category: str) -> List[str]:
+        """Get all tokens in a category"""
+        return self.categories.get(category, {}).get('tokens', [])
+
 @dataclass
 class PerformanceMetrics:
     total_api_calls: int = 0
@@ -176,6 +288,15 @@ class ThreadSafeVaultData:
         self._confluence_threshold = 1
         self._confluence_window_minutes = 10
         self._cooldown_minutes = 5
+        
+        # Theme detection settings
+        self._theme_alerts_enabled = True
+        self._theme_threshold = 2  # Minimum vaults needed for theme alert
+        self._theme_window_minutes = 15  # Theme detection window
+        self._theme_events: List[ThemeEvent] = []
+        
+        # Initialize token categorizer
+        self._token_categorizer = TokenCategorizer()
         
         # Load persisted data
         self._load_data()
@@ -227,6 +348,45 @@ class ThreadSafeVaultData:
         with self._lock:
             return self._cooldown_minutes
     
+    # Theme detection properties
+    @property
+    def theme_alerts_enabled(self) -> bool:
+        with self._lock:
+            return self._theme_alerts_enabled
+    
+    @theme_alerts_enabled.setter
+    def theme_alerts_enabled(self, value: bool):
+        with self._lock:
+            self._theme_alerts_enabled = value
+            self._safe_save()
+    
+    @property
+    def theme_threshold(self) -> int:
+        with self._lock:
+            return self._theme_threshold
+    
+    @theme_threshold.setter
+    def theme_threshold(self, value: int):
+        with self._lock:
+            self._theme_threshold = max(1, value)
+            self._safe_save()
+    
+    @property
+    def theme_window_minutes(self) -> int:
+        with self._lock:
+            return self._theme_window_minutes
+    
+    @theme_window_minutes.setter
+    def theme_window_minutes(self, value: int):
+        with self._lock:
+            self._theme_window_minutes = max(1, value)
+            self._safe_save()
+    
+    @property
+    def token_categorizer(self) -> TokenCategorizer:
+        with self._lock:
+            return self._token_categorizer
+    
     def _safe_save(self):
         """Rate-limited save to prevent excessive disk I/O"""
         current_time = time.time()
@@ -244,8 +404,11 @@ class ThreadSafeVaultData:
                 'confluence_threshold': self._confluence_threshold,
                 'confluence_window_minutes': self._confluence_window_minutes,
                 'cooldown_minutes': self._cooldown_minutes,
+                'theme_alerts_enabled': self._theme_alerts_enabled,
+                'theme_threshold': self._theme_threshold,
+                'theme_window_minutes': self._theme_window_minutes,
                 'saved_at': datetime.now().isoformat(),
-                'version': '2.2'
+                'version': '2.3'
             }
             
             # Atomic write: write to temp file first, then rename
@@ -311,6 +474,9 @@ class ThreadSafeVaultData:
                 self._confluence_threshold = data.get('confluence_threshold', 1)
                 self._confluence_window_minutes = data.get('confluence_window_minutes', 10)
                 self._cooldown_minutes = data.get('cooldown_minutes', 5)
+                self._theme_alerts_enabled = data.get('theme_alerts_enabled', True)
+                self._theme_threshold = data.get('theme_threshold', 2)
+                self._theme_window_minutes = data.get('theme_window_minutes', 15)
                 
                 version = data.get('version', 'unknown')
                 saved_at = data.get('saved_at', 'unknown')
@@ -459,6 +625,62 @@ class ThreadSafeVaultData:
             cutoff_time = current_time - timedelta(minutes=self._confluence_window_minutes)
             return [e for e in self._trade_events if e.coin == coin and e.timestamp > cutoff_time]
     
+    def add_theme_event(self, event: ThemeEvent):
+        """Thread-safe theme event addition"""
+        with self._lock:
+            self._theme_events.append(event)
+            # Clean up old theme events
+            cutoff_time = datetime.now() - timedelta(minutes=self._theme_window_minutes)
+            self._theme_events = [e for e in self._theme_events if e.timestamp > cutoff_time]
+    
+    def get_theme_events(self, theme: str, current_time: datetime) -> List[ThemeEvent]:
+        """Thread-safe theme event retrieval"""
+        with self._lock:
+            cutoff_time = current_time - timedelta(minutes=self._theme_window_minutes)
+            return [e for e in self._theme_events if e.theme == theme and e.timestamp > cutoff_time]
+    
+    def check_theme_confluence(self, trade_event: TradeEvent) -> Optional[Tuple[str, List[ThemeEvent]]]:
+        """Check if a trade event triggers theme confluence"""
+        with self._lock:
+            # Get the token category
+            category = self._token_categorizer.get_token_category(trade_event.coin)
+            if not category:
+                return None  # Token not in any category
+            
+            # Create theme event
+            theme_event = ThemeEvent(
+                theme=category,
+                vault_name=trade_event.vault_name,
+                vault_address=trade_event.vault_address,
+                coin=trade_event.coin,
+                trade_type=trade_event.trade_type,
+                size_change=trade_event.size_change,
+                timestamp=trade_event.timestamp
+            )
+            
+            # Check existing theme events BEFORE adding current one
+            existing_theme_events = self.get_theme_events(category, trade_event.timestamp)
+            existing_unique_vaults = len(set(e.vault_name for e in existing_theme_events))
+            
+            # Check if current vault already contributed to this theme
+            current_vault_already_counted = any(e.vault_name == trade_event.vault_name for e in existing_theme_events)
+            
+            # Calculate total unique vaults including current one
+            total_unique_vaults = existing_unique_vaults + (0 if current_vault_already_counted else 1)
+            
+            logger.info(f"🎯 Theme confluence for {category}: {existing_unique_vaults} existing + {trade_event.vault_name} = {total_unique_vaults} total (threshold: {self._theme_threshold})")
+            
+            # Add current theme event
+            self.add_theme_event(theme_event)
+            
+            # Check if theme threshold is met
+            if total_unique_vaults >= self._theme_threshold:
+                # Get all theme events including current one
+                all_theme_events = self.get_theme_events(category, trade_event.timestamp)
+                return category, all_theme_events
+            
+            return None
+    
     def get_previous_positions(self, vault_address: str) -> Dict[str, PositionData]:
         """Thread-safe previous position retrieval"""
         with self._lock:
@@ -494,13 +716,14 @@ class HyperliquidAdvancedBot:
             active_count = len(self.vault_data.get_active_vaults())
             
             welcome_message = (
-                "🤖 *Advanced Hyperliquid Position Monitor v2\\.2*\n\n"
+                "🤖 *Advanced Hyperliquid Position Monitor v2\\.3*\n\n"
                 "*🆕 Production\\-Grade Features:*\n"
                 "• Thread\\-safe operations\n"
                 "• Atomic data persistence\n"
                 "• Batch processing for 10\\+ vaults\n"
                 "• Smart first\\-scan filtering\n"
-                "• Enhanced error recovery\n\n"
+                "• Enhanced error recovery\n"
+                "• 🎯 Theme confluence detection\n\n"
                 "*Commands:*\n"
                 "/add\\_vault \\<address\\> \\<name\\> \\- Add vault\n"
                 "/list\\_vaults \\- Show monitored vaults\n"
@@ -510,7 +733,10 @@ class HyperliquidAdvancedBot:
                 "/performance \\- API metrics\n"
                 "/setvaults \\<number\\> \\- Set confluence threshold\n"
                 "/set\\_window \\<minutes\\> \\- Set time window\n"
-                "/health \\- System health\n\n"
+                "/health \\- System health\n"
+                "/themes \\- Theme detection settings\n"
+                "/theme\\_threshold \\<number\\> \\- Set theme threshold\n"
+                "/categories \\- List token categories\n\n"
                 f"*Current Status:*\n"
                 f"• Vaults: {active_count}/{vault_count}\n"
                 f"• Monitoring: {'🟢 Active' if self.vault_data.is_monitoring else '🔴 Stopped'}\n"
@@ -522,7 +748,7 @@ class HyperliquidAdvancedBot:
             
         except Exception as e:
             logger.error(f"Error in start command: {e}")
-            await update.message.reply_text("🤖 Advanced Hyperliquid Monitor v2.2 - Production Ready!\nUse /add_vault <address> <name> to start.")
+            await update.message.reply_text("🤖 Advanced Hyperliquid Monitor v2.3 - Production Ready!\nUse /add_vault <address> <name> to start.")
     
     async def add_vault_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /add_vault command with comprehensive validation"""
@@ -845,13 +1071,18 @@ class HyperliquidAdvancedBot:
             active_count = escape_markdown_v2(str(len(active_vaults)))
             
             message = (
-                f"⚙️ *Bot Settings v2\\.2*\n\n"
+                f"⚙️ *Bot Settings v2\\.3*\n\n"
                 f"*Status:* {status_icon} {status_text}\n"
                 f"*Vaults:* {active_count}/{vault_count} active\n\n"
                 f"*Detection Settings:*\n"
                 f"• Confluence Threshold: {confluence_threshold} vault\\(s\\)\n"
                 f"• Confluence Window: {confluence_window} minute\\(s\\)\n"
                 f"• Anti\\-spam Cooldown: {cooldown} minute\\(s\\)\n\n"
+                f"*Theme Detection:*\n"
+                f"• Status: {'🟢 Enabled' if self.vault_data.theme_alerts_enabled else '🔴 Disabled'}\n"
+                f"• Theme Threshold: {escape_markdown_v2(str(self.vault_data.theme_threshold))} vault\\(s\\)\n"
+                f"• Theme Window: {escape_markdown_v2(str(self.vault_data.theme_window_minutes))} minute\\(s\\)\n"
+                f"• Categories: {escape_markdown_v2(str(len(self.vault_data.token_categorizer.get_all_categories())))} themes\n\n"
                 f"*Production Config:*\n"
                 f"• Check Interval: {escape_markdown_v2(str(BotConfig.VAULT_CHECK_INTERVAL))} seconds\n"
                 f"• Batch Size: {escape_markdown_v2(str(BotConfig.BATCH_SIZE))} vaults\n"
@@ -871,12 +1102,14 @@ class HyperliquidAdvancedBot:
             active_vaults = self.vault_data.get_active_vaults()
             
             message = (
-                f"⚙️ Bot Settings v2.2:\n"
+                f"⚙️ Bot Settings v2.3:\n"
                 f"Status: {'Active' if self.vault_data.is_monitoring else 'Stopped'}\n"
                 f"Vaults: {len(active_vaults)}/{len(vaults)} active\n"
                 f"Confluence: {self.vault_data.confluence_threshold} vaults\n"
                 f"Window: {self.vault_data.confluence_window_minutes} minutes\n"
                 f"Cooldown: {self.vault_data.cooldown_minutes} minutes\n"
+                f"Theme Detection: {'Enabled' if self.vault_data.theme_alerts_enabled else 'Disabled'}\n"
+                f"Theme Threshold: {self.vault_data.theme_threshold} vaults\n"
                 f"Check Interval: {BotConfig.VAULT_CHECK_INTERVAL}s"
             )
             await update.message.reply_text(message)
@@ -884,6 +1117,104 @@ class HyperliquidAdvancedBot:
     async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /status command - show comprehensive status"""
         await self.show_settings_command(update, context)
+    
+    async def themes_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /themes command - show theme detection settings"""
+        try:
+            enabled_text = "🟢 Enabled" if self.vault_data.theme_alerts_enabled else "🔴 Disabled"
+            
+            message = (
+                f"🎯 **THEME DETECTION SETTINGS**\n\n"
+                f"**Status:** {enabled_text}\n"
+                f"**Threshold:** {self.vault_data.theme_threshold} vault(s)\n"
+                f"**Time Window:** {self.vault_data.theme_window_minutes} minutes\n\n"
+                f"**Available Categories:**\n"
+            )
+            
+            categories = self.vault_data.token_categorizer.get_all_categories()
+            for category in sorted(categories):
+                emoji = self.vault_data.token_categorizer.get_category_emoji(category)
+                tokens = self.vault_data.token_categorizer.get_category_tokens(category)
+                message += f"{emoji} {category}: {len(tokens)} tokens\n"
+            
+            message += (
+                f"\n**How it works:**\n"
+                f"• Detects when {self.vault_data.theme_threshold}+ vaults trade tokens from same category\n"
+                f"• Groups tokens by theme (AI, Gaming, DeFi, etc.)\n"
+                f"• Alerts on coordinated thematic trading\n\n"
+                f"**Commands:**\n"
+                f"/theme_threshold <number> - Set vault threshold\n"
+                f"/categories - List all token categories"
+            )
+            
+            await update.message.reply_text(message)
+            
+        except Exception as e:
+            logger.error(f"Error in themes command: {e}")
+            await update.message.reply_text("Error showing theme settings.")
+    
+    async def theme_threshold_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /theme_threshold command"""
+        try:
+            if not context.args:
+                await update.message.reply_text(
+                    f"Current theme threshold: {self.vault_data.theme_threshold} vault(s)\n"
+                    f"Usage: /theme_threshold <number>"
+                )
+                return
+            
+            try:
+                threshold = int(context.args[0])
+                if threshold < 1:
+                    await update.message.reply_text("Theme threshold must be at least 1")
+                    return
+                
+                self.vault_data.theme_threshold = threshold
+                await update.message.reply_text(
+                    f"✅ Theme threshold set to {threshold} vault(s)\n"
+                    f"Theme alerts will trigger when {threshold}+ vaults trade tokens from the same category."
+                )
+                
+            except ValueError:
+                await update.message.reply_text("Please provide a valid number")
+                
+        except Exception as e:
+            logger.error(f"Error in theme_threshold command: {e}")
+            await update.message.reply_text("Error setting theme threshold.")
+    
+    async def categories_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /categories command - show detailed token categories"""
+        try:
+            message = "🏷️ **TOKEN CATEGORIES**\n\n"
+            
+            categories = self.vault_data.token_categorizer.get_all_categories()
+            for category in sorted(categories):
+                emoji = self.vault_data.token_categorizer.get_category_emoji(category)
+                tokens = self.vault_data.token_categorizer.get_category_tokens(category)
+                
+                message += f"{emoji} **{category}** ({len(tokens)} tokens)\n"
+                # Show first 8 tokens, then "..." if more
+                if len(tokens) <= 8:
+                    message += f"   {', '.join(sorted(tokens))}\n\n"
+                else:
+                    displayed_tokens = sorted(tokens)[:8]
+                    remaining = len(tokens) - 8
+                    message += f"   {', '.join(displayed_tokens)}\n"
+                    message += f"   ...and {remaining} more\n\n"
+            
+            message += (
+                f"**Theme Detection:**\n"
+                f"When {self.vault_data.theme_threshold}+ vaults trade tokens from the same category "
+                f"within {self.vault_data.theme_window_minutes} minutes, you'll get a theme confluence alert!\n\n"
+                f"Example: If 2+ vaults trade AI tokens (ARKM, FET, RNDR), "
+                f"you'll get an 🤖 AI theme alert."
+            )
+            
+            await update.message.reply_text(message)
+            
+        except Exception as e:
+            logger.error(f"Error in categories command: {e}")
+            await update.message.reply_text("Error showing categories.")
     
     async def safe_api_call(self, vault_info: VaultInfo, operation: str) -> Optional[Dict]:
         """Production-grade API call with comprehensive error handling"""
@@ -1079,6 +1410,15 @@ class HyperliquidAdvancedBot:
                             vault = self.vault_data.get_vault_by_name(event.vault_name)
                             if vault:
                                 self.vault_data.set_cooldown(vault.address, coin)
+                    
+                    # THEME DETECTION: Check for theme-based confluence
+                    if self.vault_data.theme_alerts_enabled:
+                        theme_result = self.vault_data.check_theme_confluence(trade_event)
+                        if theme_result:
+                            theme, all_theme_events = theme_result
+                            unique_theme_vaults = list(set(e.vault_name for e in all_theme_events))
+                            if len(unique_theme_vaults) >= self.vault_data.theme_threshold:
+                                await self.send_theme_alert(theme, trade_event, all_theme_events)
             
             # Update previous positions
             self.vault_data.update_previous_positions(vault_info.address, current_positions)
@@ -1152,6 +1492,73 @@ class HyperliquidAdvancedBot:
                 await self.send_alert(simple_message)
             except Exception as e2:
                 logger.error(f"Error sending fallback alert: {e2}")
+    
+    async def send_theme_alert(self, theme: str, trigger_event: TradeEvent, all_theme_events: List[ThemeEvent]):
+        """Send theme confluence alert when multiple vaults trade the same theme"""
+        try:
+            # Get unique vaults involved
+            unique_vaults = list(set(e.vault_name for e in all_theme_events))
+            theme_count = len(unique_vaults)
+            
+            # Get theme emoji and details
+            emoji = self.vault_data.token_categorizer.get_category_emoji(theme)
+            tokens_traded = list(set(e.coin for e in all_theme_events))
+            
+            # Enhanced theme alert with better formatting
+            message = (
+                f"{emoji} **THEME CONFLUENCE DETECTED** {emoji}\n\n"
+                f"**Theme:** {theme} ({emoji})\n"
+                f"**Vaults Trading:** {theme_count} within {self.vault_data.theme_window_minutes}min\n"
+                f"**Tokens:** {', '.join(sorted(tokens_traded))}\n\n"
+                f"**Trigger Event:**\n"
+                f"• Vault: {trigger_event.vault_name}\n"
+                f"• Token: {trigger_event.coin}\n"
+                f"• Action: {trigger_event.trade_type}\n"
+                f"• Size: {trigger_event.old_size} → {trigger_event.new_size}\n\n"
+                f"**All {theme} Activity:**\n"
+            )
+            
+            # Add details for each vault in the theme
+            for i, vault_name in enumerate(sorted(unique_vaults), 1):
+                # Find events for this vault
+                vault_events = [e for e in all_theme_events if e.vault_name == vault_name]
+                if vault_events:
+                    # Get the most recent event for this vault
+                    latest_event = max(vault_events, key=lambda x: x.timestamp)
+                    time_diff = (trigger_event.timestamp - latest_event.timestamp).total_seconds() / 60
+                    if time_diff < 1:
+                        timing = "just now"
+                    else:
+                        timing = f"{time_diff:.0f}m ago"
+                    
+                    # Count unique tokens traded by this vault in this theme
+                    vault_tokens = list(set(e.coin for e in vault_events))
+                    token_info = f"{len(vault_tokens)} token{'s' if len(vault_tokens) > 1 else ''}"
+                    
+                    message += f"{i}. {vault_name}: {latest_event.coin} ({latest_event.trade_type}, {timing})\n"
+                    if len(vault_tokens) > 1:
+                        other_tokens = [t for t in vault_tokens if t != latest_event.coin]
+                        message += f"   └ Also: {', '.join(other_tokens)}\n"
+            
+            message += f"\n**Time:** {datetime.now().strftime('%H:%M:%S')}"
+            message += f"\n🎯 **Theme Strength:** {theme_count}/{len(self.vault_data.get_active_vaults())} vaults"
+            
+            await self.send_alert(message)
+            logger.info(f"🎯 Theme alert sent: {theme} - {theme_count} vaults trading {len(tokens_traded)} tokens")
+            
+        except Exception as e:
+            logger.error(f"Error sending theme alert: {e}")
+            # Simple fallback
+            try:
+                simple_message = (
+                    f"🎯 THEME CONFLUENCE: {theme}\n"
+                    f"Vaults: {len(set(e.vault_name for e in all_theme_events))}\n"
+                    f"Trigger: {trigger_event.vault_name} - {trigger_event.coin}\n"
+                    f"Action: {trigger_event.trade_type}"
+                )
+                await self.send_alert(simple_message)
+            except Exception as e2:
+                logger.error(f"Error sending fallback theme alert: {e2}")
     
     async def send_alert(self, message: str):
         """Send alert message to Telegram with fallback"""
@@ -1319,7 +1726,7 @@ async def main():
         logger.error("Missing required environment variables: TELEGRAM_BOT_TOKEN and/or TELEGRAM_CHAT_ID")
         return
     
-    logger.info("🚀 Initializing Advanced Hyperliquid Telegram bot v2.2...")
+    logger.info("🚀 Initializing Advanced Hyperliquid Telegram bot v2.3...")
     
     # Create production bot instance
     vault_bot = HyperliquidAdvancedBot(telegram_bot_token, chat_id)
@@ -1344,8 +1751,11 @@ async def main():
     application.add_handler(CommandHandler("backup", vault_bot.backup_command))
     application.add_handler(CommandHandler("performance", vault_bot.performance_command))
     application.add_handler(CommandHandler("health", vault_bot.health_command))
+    application.add_handler(CommandHandler("themes", vault_bot.themes_command))
+    application.add_handler(CommandHandler("theme_threshold", vault_bot.theme_threshold_command))
+    application.add_handler(CommandHandler("categories", vault_bot.categories_command))
     
-    logger.info("✅ Starting Advanced Hyperliquid Telegram bot v2.2 - Production Ready!")
+    logger.info("✅ Starting Advanced Hyperliquid Telegram bot v2.3 - Production Ready!")
     
     try:
         # Start the bot
