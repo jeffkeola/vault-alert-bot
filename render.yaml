@@ -1,6 +1,11 @@
 services:
-  - type: web
-    name: vault-alert-bot
+  - type: worker
+    name: hyperliquid-advanced-bot
     env: python
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "python main.py"
+    startCommand: "python bot.py"
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
