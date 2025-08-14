@@ -949,8 +949,8 @@ class HyperliquidAdvancedBot:
             positions = {}
             
             user_state = await self.safe_api_call(vault_info, "get_positions")
-            if not user_state:
-                return {}
+            if user_state is None:
+                return None  # API failure
             
             if user_state and 'assetPositions' in user_state:
                 for position in user_state['assetPositions']:
@@ -990,7 +990,7 @@ class HyperliquidAdvancedBot:
         except Exception as e:
             logger.error(f"Error fetching positions for {vault_info.name}: {e}")
             self.vault_data.mark_vault_failure(vault_info.address)
-            return {}
+            return None  # API failure
     
     async def check_vault_changes(self, vault_info: VaultInfo):
         """Enhanced vault change detection with first-scan filtering"""
@@ -1001,9 +1001,9 @@ class HyperliquidAdvancedBot:
             
             current_positions = await self.get_vault_positions(vault_info)
             
-            # Handle API failure
-            if not current_positions and vault_info.consecutive_failures > 0:
-                logger.warning(f"Skipping {vault_info.name} due to API issues")
+            # Handle API failure (None means API failed, empty dict {} means no positions)
+            if current_positions is None:
+                logger.warning(f"Skipping {vault_info.name} due to API failure")
                 return
             
             previous_positions = self.vault_data.get_previous_positions(vault_info.address)
@@ -1189,9 +1189,15 @@ class HyperliquidAdvancedBot:
                         task = asyncio.create_task(self.check_vault_changes(vault_info))
                         batch_tasks.append(task)
                     
-                    # Wait for batch to complete
+                    # Wait for batch to complete with proper error handling
                     if batch_tasks:
-                        await asyncio.gather(*batch_tasks, return_exceptions=True)
+                        results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+                        # Check for any exceptions in the batch
+                        for i, result in enumerate(results):
+                            if isinstance(result, Exception):
+                                vault_name = batch[i].name if i < len(batch) else "unknown"
+                                logger.error(f"Task failed for vault {vault_name}: {result}")
+                                # Don't let one vault failure stop everything
                     
                     # Delay between batches
                     if i + BotConfig.BATCH_SIZE < len(active_vaults):
@@ -1204,8 +1210,19 @@ class HyperliquidAdvancedBot:
                 await asyncio.sleep(BotConfig.VAULT_CHECK_INTERVAL)
                 
             except Exception as e:
-                logger.error(f"Error in monitoring loop: {e}")
+                logger.error(f"Critical error in monitoring loop: {e}")
+                logger.error(f"Monitoring state: {self.vault_data.is_monitoring}")
+                logger.error(f"Active vaults: {len(self.vault_data.get_active_vaults())}")
+                
+                # Log full exception traceback for debugging
+                import traceback
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                
                 await asyncio.sleep(60)  # Shorter retry on errors
+                
+        logger.warning("🛑 Monitoring loop exited - this should not happen during normal operation!")
+        logger.warning(f"Final monitoring state: {self.vault_data.is_monitoring}")
+        logger.warning(f"Final active vaults: {len(self.vault_data.get_active_vaults())}")
     
     async def health_monitor_loop(self):
         """Monitor system health and auto-recover"""
@@ -1265,6 +1282,29 @@ class HyperliquidAdvancedBot:
                 except Exception as e:
                     logger.error(f"Error sending startup message: {e}")
                     await self.send_alert("🚀 Production vault monitoring v2.2 started!")
+
+    async def stop_monitoring(self):
+        """Stop monitoring with proper cleanup"""
+        async with self._monitoring_lock:
+            self.vault_data.is_monitoring = False
+            
+            if self.monitoring_task:
+                self.monitoring_task.cancel()
+                try:
+                    await self.monitoring_task
+                except asyncio.CancelledError:
+                    pass
+                self.monitoring_task = None
+            
+            if self.health_check_task:
+                self.health_check_task.cancel()
+                try:
+                    await self.health_check_task
+                except asyncio.CancelledError:
+                    pass
+                self.health_check_task = None
+            
+            logger.info("🛑 Monitoring stopped and cleaned up")
 
 # Rest of the command handlers and methods would continue...
 # I'll implement the remaining methods following the same production-grade patterns
